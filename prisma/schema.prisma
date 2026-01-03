@@ -1,0 +1,201 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model - Supports both Farmer and Admin roles
+model User {
+  id            String    @id @default(uuid())
+  email         String?   @unique
+  phone         String?   @unique
+  password      String    // Hashed password
+  name          String
+  role          UserRole  @default(FARMER)
+  isActive      Boolean   @default(true)
+  
+  // Farmer-specific fields
+  stateId       String?
+  districtId    String?
+  villageId     String?
+  landSize      Float?    // in acres
+  preferredCrops String[] // Array of crop IDs
+  
+  // Relations
+  state         State?    @relation(fields: [stateId], references: [id])
+  district      District? @relation(fields: [districtId], references: [id])
+  village       Village?  @relation(fields: [villageId], references: [id])
+  refreshTokens RefreshToken[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+}
+
+enum UserRole {
+  FARMER
+  ADMIN
+}
+
+// Area Hierarchy Models
+model State {
+  id         String     @id @default(uuid())
+  name       String     @unique
+  code       String?    @unique // State code (e.g., "MH", "UP")
+  districts  District[]
+  users      User[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model District {
+  id        String    @id @default(uuid())
+  name      String
+  code      String?   @unique // District code
+  stateId   String
+  state     State     @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  villages  Village[]
+  users     User[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([name, stateId])
+  @@index([stateId])
+}
+
+model Village {
+  id         String    @id @default(uuid())
+  name       String
+  districtId String
+  district   District  @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  users      User[]
+  createdAt  DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([name, districtId])
+  @@index([districtId])
+}
+
+// Crop Master Data
+model Crop {
+  id              String            @id @default(uuid())
+  name            String            @unique
+  scientificName  String?
+  description     String?
+  season          CropSeason        @default(KHARIF)
+  minTemperature  Float?            // Minimum temperature in Celsius
+  maxTemperature  Float?            // Maximum temperature in Celsius
+  minRainfall     Float?            // Minimum rainfall in mm
+  maxRainfall     Float?            // Maximum rainfall in mm
+  suitableStates  String[]          // Array of state IDs
+  isActive        Boolean           @default(true)
+  
+  // Relations
+  suitabilityRules CropSuitability[]
+  marketPrices     MarketPrice[]
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+enum CropSeason {
+  KHARIF    // Monsoon season (June-October)
+  RABI      // Winter season (November-April)
+  ZAID      // Summer season (March-June)
+  ALL_SEASON
+}
+
+// Crop Suitability Rules (Rule-based, not AI)
+model CropSuitability {
+  id            String            @id @default(uuid())
+  cropId        String
+  crop          Crop              @relation(fields: [cropId], references: [id], onDelete: Cascade)
+  stateId       String?
+  districtId    String?
+  suitability   SuitabilityLevel  @default(MEDIUM)
+  explanation   String            // Why this suitability level
+  conditions    Json?             // Additional rule conditions (JSON)
+  isActive      Boolean           @default(true)
+  
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([cropId])
+  @@index([stateId])
+  @@index([districtId])
+}
+
+enum SuitabilityLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// Market Price Data
+model MarketPrice {
+  id          String    @id @default(uuid())
+  cropId      String
+  crop        Crop      @relation(fields: [cropId], references: [id], onDelete: Cascade)
+  stateId     String?
+  districtId  String?
+  price       Float     // Price per unit (e.g., per kg, per quintal)
+  unit        String    @default("kg") // Unit of measurement
+  date        DateTime  @default(now())
+  source      String?   // Source of price data
+  isActive    Boolean   @default(true)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([cropId])
+  @@index([stateId])
+  @@index([districtId])
+  @@index([date])
+}
+
+// Weather Cache - To reduce external API calls
+model WeatherCache {
+  id          String    @id @default(uuid())
+  stateId     String?
+  districtId  String?
+  villageId   String?
+  latitude    Float?
+  longitude   Float?
+  data        Json      // Cached weather data (forecast)
+  cachedAt    DateTime  @default(now())
+  expiresAt   DateTime  // Cache expiration (typically 24 hours)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([stateId])
+  @@index([districtId])
+  @@index([villageId])
+  @@index([expiresAt])
+}
+
+// Refresh Token for JWT authentication
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
